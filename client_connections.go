@@ -113,6 +113,9 @@ func readClientConnectionCommand(options *Options, host, command string) (string
 }
 
 func parseClientConnectionLimit(response string) (int, error) {
+	if !strings.HasSuffix(response, "\n") {
+		return 0, fmt.Errorf("conf response is not newline-terminated")
+	}
 	found := false
 	limit := 0
 	for _, line := range strings.Split(response, "\n") {
@@ -153,8 +156,15 @@ func parseClientConnections(response string) (map[string]int, error) {
 		if separator < 0 {
 			return nil, fmt.Errorf("cons is missing a client port at line %d", index+1)
 		}
-		ip := net.ParseIP(strings.Trim(address[:separator], "[]"))
 		port, err := strconv.Atoi(address[separator+1:])
+		address = strings.Trim(address[:separator], "[]")
+		if zone := strings.IndexByte(address, '%'); zone >= 0 {
+			if zone == len(address)-1 || net.ParseIP(address[:zone]) == nil {
+				return nil, fmt.Errorf("cons contains invalid client address at line %d", index+1)
+			}
+			address = address[:zone]
+		}
+		ip := net.ParseIP(address)
 		if ip == nil || err != nil || port < 1 || port > 65535 {
 			return nil, fmt.Errorf("cons contains invalid client address at line %d", index+1)
 		}

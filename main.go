@@ -97,18 +97,18 @@ func getMetrics(options *Options) map[string]string {
 	timeout := time.Duration(options.Timeout) * time.Second
 
 	for _, h := range options.Hosts {
-		tcpaddr, err := net.ResolveTCPAddr("tcp", h)
-		if err != nil {
-			log.Printf("warning: cannot resolve zk hostname '%s': %s", h, err)
-			continue
-		}
-
 		hostLabel := fmt.Sprintf("zk_host=%q", h)
 		zkUp := fmt.Sprintf("zk_up{%s}", hostLabel)
 		if options.ClientConnections != nil {
 			for key, value := range options.ClientConnections.collect(options, h) {
 				metrics[key] = value
 			}
+		}
+
+		tcpaddr, err := net.ResolveTCPAddr("tcp", h)
+		if err != nil {
+			log.Printf("warning: cannot resolve zk hostname '%s': %s", h, err)
+			continue
 		}
 
 		conn, err := dial(tcpaddr.String(), timeout, options.ClientCert)

@@ -17,11 +17,14 @@ func TestParseClientConnections(t *testing.T) {
 		" /[::ffff:192.0.2.10]:40102[1](queued=0)\n" +
 		" /[2001:db8::1]:41000[0](queued=0)\n" +
 		" /2001:db8::1:41001[a](queued=0)\n\n"
+	response += " /[fe80::1%2]:41002[0](queued=0)\n" +
+		" /fe80::1%eth0:41003[0](queued=0)\n"
 	counts, err := parseClientConnections(response)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(counts) != 2 || counts["192.0.2.10"] != 3 || counts["2001:db8::1"] != 2 {
+	if len(counts) != 3 || counts["192.0.2.10"] != 3 ||
+		counts["2001:db8::1"] != 2 || counts["fe80::1"] != 2 {
 		t.Fatalf("unexpected counts: %v", counts)
 	}
 	for _, invalid := range []string{
@@ -48,12 +51,33 @@ func TestParseClientConnectionLimit(t *testing.T) {
 		}
 	}
 	for _, invalid := range []string{
-		"", "maxClientCnxns=bad", "maxClientCnxns=-1",
+		"", "maxClientCnxns=bad", "maxClientCnxns=-1", "maxClientCnxns=8",
 		"maxClientCnxns=800\nmaxClientCnxns=900",
 	} {
 		if _, err := parseClientConnectionLimit(invalid); err == nil {
 			t.Errorf("accepted invalid configuration %q", invalid)
 		}
+	}
+}
+
+func TestTruncatedClientConnectionConfigFailsCollection(t *testing.T) {
+	server := newFakeZookeeper(t)
+	server.mu.Lock()
+	server.replies["conf"] = "maxClientCnxns=8"
+	server.mu.Unlock()
+
+	options := server.options()
+	host := options.Hosts[0]
+	metrics := (&clientConnectionCollector{}).collect(options, host)
+	success := fmt.Sprintf("zk_client_connections_collection_success{zk_host=%q}", host)
+	if metrics[success] != "0" {
+		t.Fatalf("truncated config reported success: %v", metrics)
+	}
+	if _, ok := metrics[fmt.Sprintf("zk_max_client_connections_per_ip{zk_host=%q}", host)]; ok {
+		t.Fatalf("truncated config reported a limit: %v", metrics)
+	}
+	if _, ok := metrics[fmt.Sprintf("zk_client_connections{zk_host=%q,client_ip=\"127.0.0.1\"}", host)]; ok {
+		t.Fatalf("truncated config reported client counts: %v", metrics)
 	}
 }
 
@@ -133,6 +157,25 @@ func TestClientCollectionOptIn(t *testing.T) {
 		if metrics[key] != want {
 			t.Errorf("%s = %q; want %q", key, metrics[key], want)
 		}
+	}
+}
+
+func TestClientCollectionReportsHostnameResolutionFailure(t *testing.T) {
+	host := "zookeeper-host-does-not-exist.invalid:2181"
+	collector := &clientConnectionCollector{}
+	metrics := getMetrics(&Options{
+		Timeout:           1,
+		Hosts:             []string{host},
+		ClientConnections: collector,
+	})
+	success := fmt.Sprintf("zk_client_connections_collection_success{zk_host=%q}", host)
+	duration := fmt.Sprintf("zk_client_connections_collection_duration_seconds{zk_host=%q}", host)
+	timestamp := fmt.Sprintf("zk_client_connections_collection_timestamp_seconds{zk_host=%q}", host)
+	if metrics[success] != "0" || metrics[duration] == "" || metrics[timestamp] == "" {
+		t.Fatalf("missing collection failure metrics after resolution failure: %v", metrics)
+	}
+	if _, ok := collector.cache[host]; !ok {
+		t.Fatal("hostname resolution failure was not cached")
 	}
 }
 
