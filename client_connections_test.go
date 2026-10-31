@@ -30,6 +30,7 @@ func TestParseClientConnections(t *testing.T) {
 	for _, invalid := range []string{
 		"cons is not executed because it is not in the whitelist.",
 		instanceNotServingMessage, "/bad:4000[1](queued=0)",
+		"/127.0.0.1%eth0:4000[1](queued=0)",
 		"/127.0.0.1:0[1](queued=0)", "/127.0.0.1:65536[1](queued=0)",
 		"/127.0.0.1:bad[1](queued=0)", "/127.0.0.1:4000[1](queued=",
 	} {

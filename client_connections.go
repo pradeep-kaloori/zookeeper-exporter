@@ -159,7 +159,8 @@ func parseClientConnections(response string) (map[string]int, error) {
 		port, err := strconv.Atoi(address[separator+1:])
 		address = strings.Trim(address[:separator], "[]")
 		if zone := strings.IndexByte(address, '%'); zone >= 0 {
-			if zone == len(address)-1 || net.ParseIP(address[:zone]) == nil {
+			zoneIP := net.ParseIP(address[:zone])
+			if zone == len(address)-1 || zoneIP == nil || zoneIP.To4() != nil {
 				return nil, fmt.Errorf("cons contains invalid client address at line %d", index+1)
 			}
 			address = address[:zone]
