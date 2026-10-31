@@ -34,6 +34,7 @@ func main() {
 	zktlsauth := flag.Bool("zk-tls-auth", false, "zk tls client authentication")
 	zktlscert := flag.String("zk-tls-auth-cert", "", "cert for zk tls client authentication")
 	zktlskey := flag.String("zk-tls-auth-key", "", "key for zk tls client authentication")
+	clientConnections := flag.Bool("client-connections", false, "collect per-IP connections and limit using cons/conf (cached for 60 seconds)")
 
 	flag.Parse()
 
@@ -56,21 +57,26 @@ func main() {
 
 	log.Printf("info: zookeeper hosts: %v", hosts)
 	log.Printf("info: serving metrics at %s%s", *listen, *location)
-	serveMetrics(&Options{
+	options := &Options{
 		Timeout:    *timeout,
 		Hosts:      hosts,
 		Location:   *location,
 		Listen:     *listen,
 		ClientCert: clientCert,
-	})
+	}
+	if *clientConnections {
+		options.ClientConnections = &clientConnectionCollector{}
+	}
+	serveMetrics(options)
 }
 
 type Options struct {
-	Timeout    int64
-	Hosts      []string
-	Location   string
-	Listen     string
-	ClientCert *tls.Certificate
+	Timeout           int64
+	Hosts             []string
+	Location          string
+	Listen            string
+	ClientCert        *tls.Certificate
+	ClientConnections *clientConnectionCollector
 }
 
 func dial(host string, timeout time.Duration, clientCert *tls.Certificate) (net.Conn, error) {
@@ -91,14 +97,19 @@ func getMetrics(options *Options) map[string]string {
 	timeout := time.Duration(options.Timeout) * time.Second
 
 	for _, h := range options.Hosts {
+		hostLabel := fmt.Sprintf("zk_host=%q", h)
+		zkUp := fmt.Sprintf("zk_up{%s}", hostLabel)
+		if options.ClientConnections != nil {
+			for key, value := range options.ClientConnections.collect(options, h) {
+				metrics[key] = value
+			}
+		}
+
 		tcpaddr, err := net.ResolveTCPAddr("tcp", h)
 		if err != nil {
 			log.Printf("warning: cannot resolve zk hostname '%s': %s", h, err)
 			continue
 		}
-
-		hostLabel := fmt.Sprintf("zk_host=%q", h)
-		zkUp := fmt.Sprintf("zk_up{%s}", hostLabel)
 
 		conn, err := dial(tcpaddr.String(), timeout, options.ClientCert)
 		if err != nil {
